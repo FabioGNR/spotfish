@@ -61,7 +61,7 @@ fn start() -> Result<(), JsValue> {
         
         void main() {
             vec2 pos = gl_FragCoord.xy / canvasSize;
-            outColor = vec4(0.5+sin(time+pos.x), 0.5+cos(time+pos.y), 1-(0.5+sin(time+pos.x+pos.y)), 1);
+            outColor = vec4(0.5+sin(time+pos.x), 0.5+cos(time+pos.y), 1.0-(0.5+sin(time+pos.x+pos.y)), 1);
         }
         "##,
     )?;
