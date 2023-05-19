@@ -1,7 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
+use instant::Instant;
 
 use wasm_bindgen::prelude::*;
-use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader};
+use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, console};
 
 struct StaticVariables {
     canvas_size: [f32; 2]
@@ -59,7 +60,8 @@ fn start() -> Result<(), JsValue> {
         out vec4 outColor;
         
         void main() {
-            outColor = vec4(gl_FragCoord.x / canvasSize.x, gl_FragCoord.y / canvasSize.y, sin(time), 1);
+            vec2 pos = gl_FragCoord.xy / canvasSize;
+            outColor = vec4(0.5+sin(time+pos.x), 0.5+cos(time+pos.y), 1-(0.5+sin(time+pos.x+pos.y)), 1);
         }
         "##,
     )?;
@@ -69,7 +71,7 @@ fn start() -> Result<(), JsValue> {
     let static_vars = StaticVariables {
         canvas_size: [canvas.width() as f32, canvas.height() as f32]
     };
-    
+
     upload_static_uniforms(&context, &program, static_vars);
 
     let vertices: [f32; 12] = [
@@ -132,8 +134,13 @@ fn start() -> Result<(), JsValue> {
         time: 0.0
     };
 
+    let start_time = Instant::now();
+
     *g.borrow_mut() = Some(Closure::new(move || {
-        dynamic_vars.time = dynamic_vars.time + 0.1;
+
+        let current_time = Instant::now();
+        let elapsed_time = current_time - start_time;
+        dynamic_vars.time = elapsed_time.as_secs_f32();
         upload_dynamic_uniforms(&context, &program, &dynamic_vars);
 
         draw(&context, vert_count);
