@@ -27,13 +27,14 @@
   },
   "homepage": "https://github.com/rustwasm/create-wasm-app#readme",
   "devDependencies": {
+    "copy-webpack-plugin": "^11.0.0",
     "hello-wasm-pack": "^0.1.0",
     "webpack": "^5.83.1",
     "webpack-cli": "^5.1.1",
-    "webpack-dev-server": "^4.15.0",
-    "copy-webpack-plugin": "^11.0.0"
+    "webpack-dev-server": "^4.15.0"
   },
   "dependencies": {
-    "spotfish": "file:../pkg"
+    "spotfish": "file:../pkg",
+    "spotify-web-api-node": "^5.0.2"
   }
 }
