@@ -1,90 +1,228 @@
-use std::{cell::RefCell, rc::Rc};
 use instant::Instant;
 
 use wasm_bindgen::prelude::*;
-use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, console};
-
+use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, console, WebGlBuffer};
+use serde::{Serialize, Deserialize};
 struct StaticVariables {
     canvas_size: [f32; 2]
 }
 
+const MAX_SECTIONS: usize = 64;
+const MAX_SEGMENTS: usize = 160;
+
+#[wasm_bindgen]
 struct DynamicVariables {
-    time: f32
+    time: f32,
+    song_position: f32,
+    song_sections: Vec<SongSection>
 }
 
-
-fn request_animation_frame(f: &Closure<dyn FnMut()>) {
-    web_sys::window().expect("missing window")
-        .request_animation_frame(f.as_ref().unchecked_ref())
-        .expect("should register `requestAnimationFrame` OK");
+#[wasm_bindgen]
+#[derive(Serialize, Deserialize)]
+pub struct SongSection {
+    pub start: f32,
+    pub duration: f32,
+    pub loudness: f32,
+    pub tempo: f32
 }
 
-#[wasm_bindgen(start)]
-fn start() -> Result<(), JsValue> {
-    let window = web_sys::window().unwrap();
-    let document = window.document().unwrap();
-    let canvas = document.get_element_by_id("canvas").unwrap();
-    let canvas: web_sys::HtmlCanvasElement = canvas.dyn_into::<web_sys::HtmlCanvasElement>()?;
+#[derive(Serialize, Deserialize)]
+pub struct SongSegment {
+    pub start: f32,
+    pub duration: f32,
+    pub pitches: [f32; 12],
+    pub timbre: [f32; 12]
+}
 
-    canvas.set_width(window.inner_width().unwrap().as_f64().unwrap() as u32);
-    canvas.set_height(window.inner_height().unwrap().as_f64().unwrap() as u32);
-    
-    let context = canvas
-        .get_context("webgl2")?
-        .unwrap()
-        .dyn_into::<WebGl2RenderingContext>()?;
-    
-    let vert_shader = compile_shader(
-        &context,
-        WebGl2RenderingContext::VERTEX_SHADER,
-        r##"#version 300 es
- 
-        in vec4 position;
+#[wasm_bindgen]
+pub struct Instance {
+    canvas: web_sys::HtmlCanvasElement,
+    context: WebGl2RenderingContext,
+    program: WebGlProgram,
+    song_sections_buffer: WebGlBuffer,
+    song_segments_buffer: WebGlBuffer,
+    vert_count: i32,
+    dynamic_vars: DynamicVariables,
+    start_time: Instant,
+    song_state_time: Instant,
+    song_position_offset: f32,
+}
 
-        void main() {
-        
-            gl_Position = position;
+#[wasm_bindgen]
+impl Instance {
+    #[wasm_bindgen(constructor)]
+    pub fn new(canvas: web_sys::HtmlCanvasElement, vert_shader: String, frag_shader: String) -> Result<Instance, JsValue> {
+        let context = canvas
+            .get_context("webgl2")?
+            .unwrap()
+            .dyn_into::<WebGl2RenderingContext>()?;
+
+        let vert_shader = compile_shader(
+            &context,
+            WebGl2RenderingContext::VERTEX_SHADER,
+            &vert_shader,
+        )?;
+    
+        let frag_shader = compile_shader(
+            &context,
+            WebGl2RenderingContext::FRAGMENT_SHADER,
+            &frag_shader,
+        )?;
+        let program = link_program(&context, &vert_shader, &frag_shader)?;
+        context.use_program(Some(&program));
+
+        let vertices = vec![
+            // First triangle:
+             1.0,  1.0,
+            -1.0,  1.0,
+            -1.0, -1.0,
+            // Second triangle:
+            -1.0, -1.0,
+             1.0, -1.0,
+             1.0,  1.0
+        ];
+
+        let vert_count = (vertices.len() / 2) as i32;
+
+        init_vertices(&context, &program, vertices)?;
+
+        // init song sections buffer
+        let sections_index = context.get_uniform_block_index(&program, "SongSections");
+        let song_sections_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
+        context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&song_sections_buffer));
+        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSection>() * MAX_SECTIONS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
+        // init song segments buffer
+        // let segments_index = context.get_uniform_block_index(&program, "SongSegments");
+        let song_segments_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
+        // context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&song_segments_buffer));
+        // context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
+        // console::log_2(&"bla".into(), &JsValue::from_f64((::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as f64));
+
+        let instance = Instance {
+            canvas,
+            context,
+            program,
+            song_sections_buffer,
+            song_segments_buffer,
+            vert_count,
+            dynamic_vars: DynamicVariables { time: 0.0, song_position: 0.0, song_sections: vec![] },
+            start_time: Instant::now(),
+            song_state_time: Instant::now(),
+            song_position_offset: 0.0
+        };
+
+        instance.update_static();
+
+        Ok(instance)
+    }
+
+    pub fn update_static(&self) {
+        let static_vars = StaticVariables {
+            canvas_size: [self.canvas.width() as f32, self.canvas.height() as f32]
+        };
+    
+        upload_static_uniforms(&self.context, &self.program, static_vars);
+    }
+
+    pub fn set_song(&mut self, sections: JsValue, segments: JsValue, position: f32) -> Result<(), JsValue> {
+        self.song_state_time = Instant::now();
+
+        let mut sections: Vec<SongSection> = serde_wasm_bindgen::from_value(sections).expect("sections not able to deserialize into SongSection");
+        let mut segments: Vec<SongSegment> = serde_wasm_bindgen::from_value(segments).expect("segments not able to deserialize into SongSegment");
+
+        sections.truncate(MAX_SECTIONS);
+        segments.truncate(MAX_SEGMENTS);
+
+        let num_sections_uniform = self.context.get_uniform_location(&self.program, "numSections");
+        self.context.uniform1i(num_sections_uniform.as_ref(), sections.len() as i32);
+    
+        let sections_index = self.context.get_uniform_block_index(&self.program, "SongSections");
+        self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&self.song_sections_buffer));
+        unsafe {
+            let bytes = ::core::slice::from_raw_parts(
+                sections.as_ptr() as *const u8,
+                ::core::mem::size_of::<SongSection>() * sections.len(),
+            );
+    
+            self.context.buffer_sub_data_with_i32_and_u8_array(
+                WebGl2RenderingContext::UNIFORM_BUFFER,
+                0,
+                bytes,
+            );
         }
-        "##,
-    )?;
 
-    let frag_shader = compile_shader(
-        &context,
-        WebGl2RenderingContext::FRAGMENT_SHADER,
-        r##"#version 300 es
+        // let num_segments_uniform = self.context.get_uniform_location(&self.program, "numSegments");
+        // self.context.uniform1i(num_segments_uniform.as_ref(), segments.len() as i32);
     
-        precision highp float;
-        uniform vec2 canvasSize;
-        uniform float time;
+        // let segments_index = self.context.get_uniform_block_index(&self.program, "SongSegments");
+        // self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&self.song_segments_buffer));
+        // unsafe {
+        //     let bytes = ::core::slice::from_raw_parts(
+        //         segments.as_ptr() as *const u8,
+        //         ::core::mem::size_of::<SongSegment>() * segments.len(),
+        //     );
+    
+        //     self.context.buffer_sub_data_with_i32_and_u8_array(
+        //         WebGl2RenderingContext::UNIFORM_BUFFER,
+        //         0,
+        //         bytes,
+        //     );
+        // }
 
-        out vec4 outColor;
-        
-        void main() {
-            vec2 pos = gl_FragCoord.xy / canvasSize;
-            outColor = vec4(0.5+sin(time+pos.x), 0.5+cos(time+pos.y), 1.0-(0.5+sin(time+pos.x+pos.y)), 1);
-        }
-        "##,
-    )?;
-    let program = link_program(&context, &vert_shader, &frag_shader)?;
-    context.use_program(Some(&program));
+        self.dynamic_vars.song_sections = sections;
+        self.dynamic_vars.song_position = position;
+        self.song_position_offset = position;
 
-    let static_vars = StaticVariables {
-        canvas_size: [canvas.width() as f32, canvas.height() as f32]
-    };
+        upload_dynamic_uniforms(&self.context, &self.program, &self.dynamic_vars)
+    }
 
-    upload_static_uniforms(&context, &program, static_vars);
+    pub fn draw(&mut self) -> Result<(), JsValue> {
+        let current_time = Instant::now();
+        let elapsed_time = current_time - self.start_time;
+        self.dynamic_vars.time = elapsed_time.as_secs_f32();
 
-    let vertices: [f32; 12] = [
-        // First triangle:
-         1.0,  1.0,
-        -1.0,  1.0,
-        -1.0, -1.0,
-        // Second triangle:
-        -1.0, -1.0,
-         1.0, -1.0,
-         1.0,  1.0
-    ];
+        let elapsed_song_time = current_time - self.song_state_time;
+        self.dynamic_vars.song_position = self.song_position_offset + elapsed_song_time.as_secs_f32();
+        upload_dynamic_uniforms(&self.context, &self.program, &self.dynamic_vars)?;
 
+        draw(&self.context, self.vert_count);
+        Ok(())
+    }
+}
+
+fn upload_static_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgram, variables: StaticVariables) {
+    let canvas_size_uniform = context.get_uniform_location(&program, "canvasSize");
+    context.uniform2fv_with_f32_array(canvas_size_uniform.as_ref(), variables.canvas_size.as_slice());  
+}
+
+fn get_current_section_index(variables: &DynamicVariables) -> u32 {
+    let current_section = variables.song_sections.iter()
+        .position(|s| s.start < variables.song_position && s.start + s.duration > variables.song_position);
+
+    return current_section.unwrap_or(0) as u32;
+}
+
+fn upload_dynamic_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgram, variables: &DynamicVariables) -> Result<(), JsValue> {
+    let time_uniform = context.get_uniform_location(&program, "time");
+    context.uniform1f(time_uniform.as_ref(), variables.time);
+    
+    let song_time_uniform = context.get_uniform_location(&program, "songTime");
+    context.uniform1f(song_time_uniform.as_ref(), variables.song_position);
+
+    let current_section_uniform = context.get_uniform_location(&program, "currentSongSection");
+    context.uniform1ui(current_section_uniform.as_ref(), get_current_section_index(&variables));
+
+    Ok(())
+}
+
+fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
+    context.clear_color(0.0, 0.0, 0.0, 1.0);
+    context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
+
+    context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);
+}
+
+pub fn init_vertices(context: &WebGl2RenderingContext, program: &WebGlProgram, vertices: Vec<f32>) -> Result<(), JsValue> {
     let position_attribute_location = context.get_attrib_location(&program, "position");
     let buffer = context.create_buffer().ok_or("Failed to create buffer")?;
     context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
@@ -124,50 +262,7 @@ fn start() -> Result<(), JsValue> {
 
     context.bind_vertex_array(Some(&vao));
 
-    let vert_count = (vertices.len() / 2) as i32;
-    draw(&context, vert_count);
-
-    let f = Rc::new(RefCell::new(None));
-    let g = f.clone();
-
-    let mut dynamic_vars = DynamicVariables {
-        time: 0.0
-    };
-
-    let start_time = Instant::now();
-
-    *g.borrow_mut() = Some(Closure::new(move || {
-
-        let current_time = Instant::now();
-        let elapsed_time = current_time - start_time;
-        dynamic_vars.time = elapsed_time.as_secs_f32();
-        upload_dynamic_uniforms(&context, &program, &dynamic_vars);
-
-        draw(&context, vert_count);
-        // Schedule ourself for another requestAnimationFrame callback.
-        request_animation_frame(f.borrow().as_ref().unwrap());
-    }));
-
-    request_animation_frame(g.borrow().as_ref().unwrap());
-
     Ok(())
-}
-
-fn upload_static_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgram, variables: StaticVariables) {
-    let canvas_size_uniform = context.get_uniform_location(&program, "canvasSize");
-    context.uniform2fv_with_f32_array(canvas_size_uniform.as_ref(), variables.canvas_size.as_slice());  
-}
-
-fn upload_dynamic_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgram, variables: &DynamicVariables) {
-    let time_uniform = context.get_uniform_location(&program, "time");
-    context.uniform1f(time_uniform.as_ref(), variables.time);
-}
-
-fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
-    context.clear_color(0.0, 0.0, 0.0, 1.0);
-    context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
-
-    context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);
 }
 
 pub fn compile_shader(
