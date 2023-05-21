@@ -62,14 +62,14 @@ void main() {
     float beatsPerSecond = 60.0 / section.tempo;
     float beatProgress = pow(mod(songTime, beatsPerSecond) / beatsPerSecond, 2.0);
     float intenseness = pow(2.0, -10.0 * (1.0 - ((section.loudness + 60.0) / 60.0)));
-    float dist = 1.0 - length(abs(pos - vec2(0.5, 0.5)));
+    vec2 beatPos = vec2((1.0+sin(time))/2.0, 0.5);
+    float dist = 1.0 - pow(length(abs(pos - beatPos)), 1.1);
 
     vec4 intensenessColor = vec4(intenseness, 1.0-intenseness, 0.0, 1.0);
+    vec4 uvColor = vec4(pos.x, pos.y, mix(pos.x, pos.y, sin(beatProgress * section.tempo / 60.0)), 1.0);
     vec4 beatColor = vec4(intenseness, 1.0 - intenseness, beatProgress, 1.0);
 
-    outColor = mix(intensenessColor, beatColor, dist);
-
-    // outColor = vec4(intenseness, 1.0-intenseness, beatProgress, 1.0);
+    outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist);
 }`;
 
 
