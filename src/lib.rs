@@ -8,7 +8,7 @@ struct StaticVariables {
 }
 
 const MAX_SECTIONS: usize = 64;
-const MAX_SEGMENTS: usize = 160;
+const MAX_SEGMENTS: usize = 100;
 
 #[wasm_bindgen]
 struct DynamicVariables {
@@ -19,6 +19,7 @@ struct DynamicVariables {
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
+#[repr(C, align(16))]
 pub struct SongSection {
     pub start: f32,
     pub duration: f32,
@@ -27,11 +28,12 @@ pub struct SongSection {
 }
 
 #[derive(Serialize, Deserialize)]
+#[repr(C, align(16))]
 pub struct SongSegment {
     pub start: f32,
     pub duration: f32,
     pub pitches: [f32; 12],
-    pub timbre: [f32; 12]
+    pub timbre: [f32; 12],
 }
 
 #[wasm_bindgen]
@@ -92,11 +94,10 @@ impl Instance {
         context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&song_sections_buffer));
         context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSection>() * MAX_SECTIONS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
         // init song segments buffer
-        // let segments_index = context.get_uniform_block_index(&program, "SongSegments");
+        let segments_index = context.get_uniform_block_index(&program, "SongSegments");
         let song_segments_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
-        // context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&song_segments_buffer));
-        // context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
-        // console::log_2(&"bla".into(), &JsValue::from_f64((::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as f64));
+        context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&song_segments_buffer));
+        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
 
         let instance = Instance {
             canvas,
@@ -151,23 +152,23 @@ impl Instance {
             );
         }
 
-        // let num_segments_uniform = self.context.get_uniform_location(&self.program, "numSegments");
-        // self.context.uniform1i(num_segments_uniform.as_ref(), segments.len() as i32);
+        let num_segments_uniform = self.context.get_uniform_location(&self.program, "numSegments");
+        self.context.uniform1i(num_segments_uniform.as_ref(), segments.len() as i32);
     
-        // let segments_index = self.context.get_uniform_block_index(&self.program, "SongSegments");
-        // self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&self.song_segments_buffer));
-        // unsafe {
-        //     let bytes = ::core::slice::from_raw_parts(
-        //         segments.as_ptr() as *const u8,
-        //         ::core::mem::size_of::<SongSegment>() * segments.len(),
-        //     );
+        let segments_index = self.context.get_uniform_block_index(&self.program, "SongSegments");
+        self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&self.song_segments_buffer));
+        unsafe {
+            let bytes = ::core::slice::from_raw_parts(
+                segments.as_ptr() as *const u8,
+                ::core::mem::size_of::<SongSegment>() * segments.len(),
+            );
     
-        //     self.context.buffer_sub_data_with_i32_and_u8_array(
-        //         WebGl2RenderingContext::UNIFORM_BUFFER,
-        //         0,
-        //         bytes,
-        //     );
-        // }
+            self.context.buffer_sub_data_with_i32_and_u8_array(
+                WebGl2RenderingContext::UNIFORM_BUFFER,
+                0,
+                bytes,
+            );
+        }
 
         self.dynamic_vars.song_sections = sections;
         self.dynamic_vars.song_position = position;

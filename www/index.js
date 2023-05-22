@@ -21,6 +21,7 @@ void main() {
 const FRAG_SHADER = `#version 300 es
  
 precision highp float;
+layout(std140) uniform;
 
 struct SongSection {
     float start;
@@ -32,8 +33,8 @@ struct SongSection {
 struct SongSegment {
     float start;
     float duration;
-    float pitches[12];
-    float timbre[12];
+    vec4 pitches[3];
+    vec4 timbre[3];
 };
 
 uniform vec2 canvasSize;
@@ -46,11 +47,11 @@ uniform SongSections
 uniform int numSections;
 uniform uint currentSongSection;
 
-// uniform SongSegments
-// {   
-//     SongSegment songSegments[2];
-// };
-// uniform int numSegments;
+uniform SongSegments
+{   
+    SongSegment songSegments[100];
+};
+uniform int numSegments;
 
 out vec4 outColor;
 
