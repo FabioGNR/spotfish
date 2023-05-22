@@ -22,6 +22,7 @@ const FRAG_SHADER = `#version 300 es
  
 precision highp float;
 layout(std140) uniform;
+#define PI 3.1415926538
 
 struct SongSection {
     float start;
@@ -57,13 +58,11 @@ out vec4 outColor;
 
 void main() {
     vec2 pos = gl_FragCoord.xy / canvasSize;
-    float z = max(mod(pos.x, pos.y), mod(pos.y, pos.x));
-    // outColor = vec4(0.5+sin(time+pos.x), 0.5+sin(time+pos.y), 1.0-(0.5+sin(time+z)), 1.0);
     SongSection section = songSections[currentSongSection];
     float beatsPerSecond = 60.0 / section.tempo;
     float beatProgress = pow(mod(songTime, beatsPerSecond) / beatsPerSecond, 2.0);
     float intenseness = pow(2.0, -10.0 * (1.0 - ((section.loudness + 60.0) / 60.0)));
-    vec2 beatPos = vec2((1.0+sin(time))/2.0, 0.5);
+    vec2 beatPos = vec2((1.0+sin(2.0*PI*(0.5/beatsPerSecond)*songTime))/2.0, 0.5);
     float dist = 1.0 - pow(length(abs(pos - beatPos)), 1.1);
 
     vec4 intensenessColor = vec4(intenseness, 1.0-intenseness, 0.0, 1.0);
