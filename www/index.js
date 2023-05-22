@@ -59,10 +59,13 @@ out vec4 outColor;
 void main() {
     vec2 pos = gl_FragCoord.xy / canvasSize;
     SongSection section = songSections[currentSongSection];
+    float sectionPos = songTime - section.start;
+
     float beatsPerSecond = 60.0 / section.tempo;
-    float beatProgress = pow(mod(songTime, beatsPerSecond) / beatsPerSecond, 2.0);
+    float beatProgress = pow(mod(sectionPos, beatsPerSecond) / beatsPerSecond, 2.0);
     float intenseness = pow(2.0, -10.0 * (1.0 - ((section.loudness + 60.0) / 60.0)));
-    vec2 beatPos = vec2((1.0+sin(2.0*PI*(0.5/beatsPerSecond)*songTime))/2.0, 0.5);
+
+    vec2 beatPos = vec2((1.0+sin(2.0*PI*(0.5/beatsPerSecond)*sectionPos))/2.0, 0.5);
     float dist = 1.0 - pow(length(abs(pos - beatPos)), 1.1);
 
     vec4 intensenessColor = vec4(intenseness, 1.0-intenseness, 0.0, 1.0);
