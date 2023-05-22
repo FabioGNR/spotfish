@@ -45,14 +45,15 @@ uniform SongSections
 {   
     SongSection songSections[64];
 };
-uniform int numSections;
+uniform uint numSections;
 uniform uint currentSongSection;
 
 uniform SongSegments
 {   
     SongSegment songSegments[100];
 };
-uniform int numSegments;
+uniform uint numSegments;
+uniform uint currentSongSegment;
 
 out vec4 outColor;
 
@@ -72,15 +73,14 @@ void main() {
     vec4 uvColor = vec4(pos.x, pos.y, mix(pos.x, pos.y, sin(beatProgress * section.tempo / 60.0)), 1.0);
     vec4 beatColor = vec4(intenseness, 1.0 - intenseness, beatProgress, 1.0);
 
-    int segmentIdx = int(mod(sectionPos, 12.0));
-    SongSegment segment = songSegments[segmentIdx];
+    SongSegment segment = songSegments[currentSongSegment];
 
     outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist);
 
     for (int i = 0; i < 12; i++) {
         float pitch = segment.pitches[i / 4][i % 4];
-        if (pitch > 0.9 && abs(pos.x - (1.0/12.0)*float(i)) < 0.035) {
-            outColor = vec4(1.0, 0.0, 0.0, 1.0);
+        if (pitch > 0.99 && abs(pos.x - (1.0/12.0)*float(i)) < 0.02) {
+            outColor = vec4(pitch, 0.0, 0.0, 1.0);
         }
     }
 }`;

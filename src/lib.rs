@@ -3,6 +3,8 @@ use instant::Instant;
 use wasm_bindgen::prelude::*;
 use web_sys::{WebGl2RenderingContext, WebGlProgram, WebGlShader, console, WebGlBuffer};
 use serde::{Serialize, Deserialize};
+use std140;
+
 struct StaticVariables {
     canvas_size: [f32; 2]
 }
@@ -14,12 +16,10 @@ const MAX_SEGMENTS: usize = 100;
 struct DynamicVariables {
     time: f32,
     song_position: f32,
-    song_sections: Vec<SongSection>
 }
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
-#[repr(C, align(16))]
 pub struct SongSection {
     pub start: f32,
     pub duration: f32,
@@ -27,13 +27,89 @@ pub struct SongSection {
     pub tempo: f32
 }
 
+#[std140::repr_std140]
+struct SongSectionGpu {
+    start: std140::float,
+    duration: std140::float,
+    loudness: std140::float,
+    tempo: std140::float
+}
+
+
+impl From<&SongSection> for SongSectionGpu {
+    fn from(value: &SongSection) -> Self {
+        Self {
+            start: std140::float(value.start),
+            duration: std140::float(value.duration),
+            loudness: std140::float(value.loudness),
+            tempo: std140::float(value.tempo),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
-#[repr(C, align(16))]
 pub struct SongSegment {
     pub start: f32,
     pub duration: f32,
     pub pitches: [f32; 12],
     pub timbre: [f32; 12],
+}
+
+#[std140::repr_std140]
+struct SongSegmentGpu {
+    pub start: std140::float,
+    pub duration: std140::float,
+    pub pitches: std140::array<std140::vec4, 3>,
+    pub timbre: std140::array<std140::vec4, 3>,
+}
+
+impl SongSegmentGpu {
+    fn array_to_vec4s(floats: &[f32; 12]) -> std140::array<std140::vec4, 3> {
+        std140::array![
+            std140::vec4(floats[0], floats[1], floats[2], floats[3]),
+            std140::vec4(floats[4], floats[5], floats[6], floats[7]),
+            std140::vec4(floats[8], floats[9], floats[10], floats[11]),
+        ]
+    }
+}
+
+impl From<&SongSegment> for SongSegmentGpu {
+    fn from(value: &SongSegment) -> Self {
+        Self {
+            start: std140::float(value.start),
+            duration: std140::float(value.duration),
+            pitches: Self::array_to_vec4s(&value.pitches),
+            timbre: Self::array_to_vec4s(&value.timbre),
+        }
+    }
+}
+
+struct SongData {
+    sections: Vec<SongSection>,
+    segments: Vec<SongSegment>
+}
+
+impl SongData {
+    fn new() -> Self {
+        Self {
+            sections: vec![],
+            segments: vec![],
+        }
+    }
+}
+
+struct GpuData {
+    sections: Vec<SongSectionGpu>,
+    segments: Vec<SongSegmentGpu>
+}
+
+impl GpuData {
+    fn new() -> Self {
+        Self {
+            sections: vec![],
+            segments: vec![],
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -48,6 +124,8 @@ pub struct Instance {
     start_time: Instant,
     song_state_time: Instant,
     song_position_offset: f32,
+    song_data: Box<SongData>,
+    gpu_data: Box<GpuData>
 }
 
 #[wasm_bindgen]
@@ -93,14 +171,14 @@ impl Instance {
         let song_sections_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
         context.uniform_block_binding(&program, sections_index, sections_index);
         context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&song_sections_buffer));
-        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSection>() * MAX_SECTIONS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
+        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSectionGpu>() * MAX_SECTIONS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
 
         // init song segments buffer
         let segments_index = context.get_uniform_block_index(&program, "SongSegments");
         let song_segments_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
         context.uniform_block_binding(&program, segments_index, segments_index);
         context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&song_segments_buffer));
-        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
+        context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegmentGpu>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
 
         let instance = Instance {
             canvas,
@@ -109,10 +187,12 @@ impl Instance {
             song_sections_buffer,
             song_segments_buffer,
             vert_count,
-            dynamic_vars: DynamicVariables { time: 0.0, song_position: 0.0, song_sections: vec![] },
+            dynamic_vars: DynamicVariables { time: 0.0, song_position: 0.0 },
             start_time: Instant::now(),
             song_state_time: Instant::now(),
-            song_position_offset: 0.0
+            song_position_offset: 0.0,
+            song_data: Box::new(SongData::new()),
+            gpu_data: Box::new(GpuData::new())
         };
 
         instance.update_static();
@@ -132,20 +212,21 @@ impl Instance {
         self.song_state_time = Instant::now();
 
         let mut sections: Vec<SongSection> = serde_wasm_bindgen::from_value(sections).expect("sections not able to deserialize into SongSection");
-        let mut segments: Vec<SongSegment> = serde_wasm_bindgen::from_value(segments).expect("segments not able to deserialize into SongSegment");
-
         sections.truncate(MAX_SECTIONS);
-        segments.truncate(MAX_SEGMENTS);
+        let segments: Vec<SongSegment> = serde_wasm_bindgen::from_value(segments).expect("segments not able to deserialize into SongSegment");
+
+        let gpu_sections: Vec<SongSectionGpu> = sections.iter().map(|s| s.into()).collect();
+        let gpu_segments: Vec<SongSegmentGpu> = segments.iter().map(|s| s.into()).collect();
 
         let num_sections_uniform = self.context.get_uniform_location(&self.program, "numSections");
-        self.context.uniform1i(num_sections_uniform.as_ref(), sections.len() as i32);
+        self.context.uniform1ui(num_sections_uniform.as_ref(), sections.len() as u32);
     
         let sections_index = self.context.get_uniform_block_index(&self.program, "SongSections");
         self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&self.song_sections_buffer));
         unsafe {
             let bytes = ::core::slice::from_raw_parts(
-                sections.as_ptr() as *const u8,
-                ::core::mem::size_of::<SongSection>() * sections.len(),
+                gpu_sections.as_ptr() as *const u8,
+                ::core::mem::size_of::<SongSectionGpu>() * gpu_sections.len(),
             );
     
             self.context.buffer_sub_data_with_i32_and_u8_array(
@@ -155,31 +236,31 @@ impl Instance {
             );
         }
 
-        let num_segments_uniform = self.context.get_uniform_location(&self.program, "numSegments");
-        self.context.uniform1i(num_segments_uniform.as_ref(), segments.len() as i32);
-    
-        let segments_index = self.context.get_uniform_block_index(&self.program, "SongSegments");
-        self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&self.song_segments_buffer));
-        unsafe {
-            let bytes = ::core::slice::from_raw_parts(
-                segments.as_ptr() as *const u8,
-                ::core::mem::size_of::<SongSegment>() * segments.len(),
-            );
-    
-            self.context.buffer_sub_data_with_i32_and_u8_array(
-                WebGl2RenderingContext::UNIFORM_BUFFER,
-                0,
-                bytes,
-            );
-        }
-
-        self.dynamic_vars.song_sections = sections;
+        self.song_data.sections = sections;
+        self.song_data.segments = segments;
         self.dynamic_vars.song_position = position;
         self.song_position_offset = position;
+
+        self.gpu_data.sections = gpu_sections;
+        self.gpu_data.segments = gpu_segments;
 
         upload_dynamic_uniforms(&self.context, &self.program, &self.dynamic_vars)
     }
 
+    fn get_current_section_index(&self) -> u32 {
+        let current_section = self.song_data.sections.iter()
+            .position(|s| s.start < self.dynamic_vars.song_position && s.start + s.duration > self.dynamic_vars.song_position);
+    
+        return current_section.unwrap_or(0) as u32;
+    }
+
+    fn get_current_segment_index(&self) -> usize {
+        let current_segment = self.song_data.segments.iter()
+            .position(|s| s.start < self.dynamic_vars.song_position && s.start + s.duration > self.dynamic_vars.song_position);
+
+        return current_segment.unwrap_or(0);
+    }
+   
     pub fn draw(&mut self) -> Result<(), JsValue> {
         let current_time = Instant::now();
         let elapsed_time = current_time - self.start_time;
@@ -188,6 +269,34 @@ impl Instance {
         let elapsed_song_time = current_time - self.song_state_time;
         self.dynamic_vars.song_position = self.song_position_offset + elapsed_song_time.as_secs_f32();
         upload_dynamic_uniforms(&self.context, &self.program, &self.dynamic_vars)?;
+
+        let current_section_uniform = self.context.get_uniform_location(&self.program, "currentSongSection");
+        self.context.uniform1ui(current_section_uniform.as_ref(), self.get_current_section_index());
+
+        let current_segment = self.get_current_segment_index();
+        let start_segment = std::cmp::max(current_segment - 3, 0);
+        let end_segment = std::cmp::min(start_segment + 10, self.song_data.segments.len());
+
+        let num_segments_uniform = self.context.get_uniform_location(&self.program, "numSegments");
+        self.context.uniform1ui(num_segments_uniform.as_ref(), (end_segment - start_segment) as u32);
+    
+        let current_segment_uniform = self.context.get_uniform_location(&self.program, "currentSongSegment");
+        self.context.uniform1ui(current_segment_uniform.as_ref(), (current_segment - start_segment) as u32);
+    
+        let segments_index = self.context.get_uniform_block_index(&self.program, "SongSegments");
+        self.context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&self.song_segments_buffer));
+        unsafe {
+            let bytes = ::core::slice::from_raw_parts(
+                (self.gpu_data.segments.as_ptr().offset(start_segment as isize)) as *const u8,
+                ::core::mem::size_of::<SongSegmentGpu>() * (end_segment - start_segment),
+            );
+    
+            self.context.buffer_sub_data_with_i32_and_u8_array(
+                WebGl2RenderingContext::UNIFORM_BUFFER,
+                0,
+                bytes
+            );
+        }
 
         draw(&self.context, self.vert_count);
         Ok(())
@@ -199,12 +308,6 @@ fn upload_static_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgr
     context.uniform2fv_with_f32_array(canvas_size_uniform.as_ref(), variables.canvas_size.as_slice());  
 }
 
-fn get_current_section_index(variables: &DynamicVariables) -> u32 {
-    let current_section = variables.song_sections.iter()
-        .position(|s| s.start < variables.song_position && s.start + s.duration > variables.song_position);
-
-    return current_section.unwrap_or(0) as u32;
-}
 
 fn upload_dynamic_uniforms(context: &WebGl2RenderingContext, program: &WebGlProgram, variables: &DynamicVariables) -> Result<(), JsValue> {
     let time_uniform = context.get_uniform_location(&program, "time");
@@ -212,9 +315,6 @@ fn upload_dynamic_uniforms(context: &WebGl2RenderingContext, program: &WebGlProg
     
     let song_time_uniform = context.get_uniform_location(&program, "songTime");
     context.uniform1f(song_time_uniform.as_ref(), variables.song_position);
-
-    let current_section_uniform = context.get_uniform_location(&program, "currentSongSection");
-    context.uniform1ui(current_section_uniform.as_ref(), get_current_section_index(&variables));
 
     Ok(())
 }
