@@ -91,11 +91,14 @@ impl Instance {
         // init song sections buffer
         let sections_index = context.get_uniform_block_index(&program, "SongSections");
         let song_sections_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
+        context.uniform_block_binding(&program, sections_index, sections_index);
         context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, sections_index, Some(&song_sections_buffer));
         context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSection>() * MAX_SECTIONS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
+
         // init song segments buffer
         let segments_index = context.get_uniform_block_index(&program, "SongSegments");
         let song_segments_buffer = context.create_buffer().ok_or("Failed to create buffer")?;
+        context.uniform_block_binding(&program, segments_index, segments_index);
         context.bind_buffer_base(WebGl2RenderingContext::UNIFORM_BUFFER, segments_index, Some(&song_segments_buffer));
         context.buffer_data_with_i32(WebGl2RenderingContext::UNIFORM_BUFFER, (::core::mem::size_of::<SongSegment>() * MAX_SEGMENTS) as i32, WebGl2RenderingContext::DYNAMIC_DRAW);
 
