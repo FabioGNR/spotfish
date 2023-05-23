@@ -74,13 +74,21 @@ void main() {
     vec4 beatColor = vec4(intenseness, 1.0 - intenseness, beatProgress, 1.0);
 
     SongSegment segment = songSegments[currentSongSegment];
+    SongSegment nextSegment = songSegments[min( numSegments - 1u, currentSongSegment + 1u)];
+    float segmentProgress = (songTime - segment.start) / segment.duration;
+    float pitchWidth = 1.0 / 11.0;
+    float pitchPadding = 0.001;
+    float pitchColor = segment.timbre[1][1] / segment.timbre[0][1];
 
-    outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist);
+    outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist) * 0.2;
+    outColor.w = 1.0;
 
     for (int i = 0; i < 12; i++) {
         float pitch = segment.pitches[i / 4][i % 4];
-        if (pitch > 0.99 && abs(pos.x - (1.0/12.0)*float(i)) < 0.02) {
-            outColor = vec4(pitch, 0.0, 0.0, 1.0);
+        float nextPitch = nextSegment.pitches[i / 4][i % 4];
+        float interpolatedPitch = pow(mix(pitch, nextPitch, pow(segmentProgress, 2.0)), 4.0);
+        if (abs(pos.x-pitchWidth/2.0 - pitchWidth*float(i)) < (pitchWidth/2.0-pitchPadding) && pos.y < interpolatedPitch && mod(pos.y, 0.01) > 0.001) {
+            outColor = vec4(pos.x, 1.0-pos.x, pitchColor, 1.0);
         }
     }
 }`;
