@@ -100,6 +100,28 @@ let startRender = () => {
     requestAnimationFrame(draw);
 };
 
+function startAuth() {
+    const scopes = ['user-read-private', 'user-read-playback-state'],
+    redirectUri = 'http://localhost:8080',
+    state = 'start',
+    showDialog = true,
+    responseType = 'token';
+
+  const spotifyApi = new SpotifyWebApi({
+    redirectUri: redirectUri,
+    clientId: clientId
+  });
+  
+  const authorizeURL = spotifyApi.createAuthorizeURL(
+    scopes,
+    state,
+    showDialog,
+    responseType
+  );
+  
+  window.open(authorizeURL, "_self");
+}
+
 if (window.location.hash.includes("access_token")) {
     const params = new URLSearchParams(window.location.hash.substring(1));
     const accessToken = params.get("access_token");
@@ -109,41 +131,41 @@ if (window.location.hash.includes("access_token")) {
 
     spotifyApi.setAccessToken(accessToken);
 
-    spotifyApi.getMyCurrentPlaybackState().then(state => {
+    const updateSong = async () => {
+        const state = await spotifyApi.getMyCurrentPlaybackState();
         const playbackTimestamp = new Date();
         if (state != null) {
             if (state.body.item?.id) {
-                spotifyApi.getAudioAnalysisForTrack(state.body.item.id).then(analysis => {
+                return spotifyApi.getAudioAnalysisForTrack(state.body.item.id).then(analysis => {
                     console.log(analysis.body);
                     const playbackOffset = (new Date() - playbackTimestamp);
-                    console.log("Set song", instance.set_song(analysis.body.sections, analysis.body.segments, (state.body.progress_ms + playbackOffset) / 1000));
-                    startRender();
+                    instance.set_song(analysis.body.sections, analysis.body.segments, (state.body.progress_ms + playbackOffset) / 1000);
                 });
             }
         }
+    };
+
+    updateSong().then(() => {
+        startRender();
+        let updateInterval = undefined;
+        updateInterval = setInterval(() => {
+            try {
+                updateSong();
+            } catch (error) {
+                console.log(error);
+                clearInterval(updateInterval);
+                startAuth();
+            }
+        }, 1500);
+    })
+    .catch((error) => {
+        console.log(error);
+        startAuth();
     });
 } else {
     startRender();
     document.body.addEventListener("click",
     () => {
-        const scopes = ['user-read-private', 'user-read-playback-state'],
-          redirectUri = 'http://localhost:8080',
-          state = 'start',
-          showDialog = true,
-          responseType = 'token';
-    
-        const spotifyApi = new SpotifyWebApi({
-          redirectUri: redirectUri,
-          clientId: clientId
-        });
-        
-        const authorizeURL = spotifyApi.createAuthorizeURL(
-          scopes,
-          state,
-          showDialog,
-          responseType
-        );
-        
-        window.open(authorizeURL, "_self");
+        startAuth();
     });
 }
