@@ -87,6 +87,10 @@ void main() {
 
 
 let instance = new wasm.Instance(canvas, VERT_SHADER, FRAG_SHADER);
+window.addEventListener("keydown", () => {
+    instance.print_song_time();
+});
+
 let startRender = () => {
     function draw() {
         instance.draw();

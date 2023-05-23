@@ -247,6 +247,10 @@ impl Instance {
         upload_dynamic_uniforms(&self.context, &self.program, &self.dynamic_vars)
     }
 
+    pub fn print_song_time(&self) {
+        console::log_2(&"Song time:".into(), &self.dynamic_vars.song_position.into());
+    }
+
     fn get_current_section_index(&self) -> u32 {
         let current_section = self.song_data.sections.iter()
             .position(|s| s.start < self.dynamic_vars.song_position && s.start + s.duration > self.dynamic_vars.song_position);
