@@ -34,6 +34,7 @@ struct SongSection {
 struct SongSegment {
     float start;
     float duration;
+    float loudness_max_time;
     vec4 pitches[3];
     vec4 timbre[3];
 };
@@ -75,7 +76,7 @@ void main() {
 
     SongSegment segment = songSegments[currentSongSegment];
     SongSegment nextSegment = songSegments[min( numSegments - 1u, currentSongSegment + 1u)];
-    float segmentProgress = (songTime - segment.start) / segment.duration;
+    float segmentProgress = max(0.0, (songTime - (segment.start + segment.loudness_max_time)) / segment.duration);
     float pitchWidth = 1.0 / 11.0;
     float pitchPadding = 0.001;
     float pitchColor = segment.timbre[1][1] / segment.timbre[0][1];
@@ -86,7 +87,7 @@ void main() {
     for (int i = 0; i < 12; i++) {
         float pitch = segment.pitches[i / 4][i % 4];
         float nextPitch = nextSegment.pitches[i / 4][i % 4];
-        float interpolatedPitch = pow(mix(pitch, nextPitch, pow(segmentProgress, 2.0)), 4.0);
+        float interpolatedPitch = pow(mix(pitch, nextPitch, pow(segmentProgress, 2.0)), 2.0);
         if (abs(pos.x-pitchWidth/2.0 - pitchWidth*float(i)) < (pitchWidth/2.0-pitchPadding) && pos.y < interpolatedPitch && mod(pos.y, 0.01) > 0.001) {
             outColor = vec4(pos.x, 1.0-pos.x, pitchColor, 1.0);
         }

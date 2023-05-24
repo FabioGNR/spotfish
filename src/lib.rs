@@ -51,6 +51,7 @@ impl From<&SongSection> for SongSectionGpu {
 pub struct SongSegment {
     pub start: f32,
     pub duration: f32,
+    pub loudness_max_time: f32,
     pub pitches: [f32; 12],
     pub timbre: [f32; 12],
 }
@@ -59,6 +60,7 @@ pub struct SongSegment {
 struct SongSegmentGpu {
     pub start: std140::float,
     pub duration: std140::float,
+    pub loudness_max_time: std140::float,
     pub pitches: std140::array<std140::vec4, 3>,
     pub timbre: std140::array<std140::vec4, 3>,
 }
@@ -78,6 +80,7 @@ impl From<&SongSegment> for SongSegmentGpu {
         Self {
             start: std140::float(value.start),
             duration: std140::float(value.duration),
+            loudness_max_time: std140::float(value.loudness_max_time),
             pitches: Self::array_to_vec4s(&value.pitches),
             timbre: Self::array_to_vec4s(&value.timbre),
         }
