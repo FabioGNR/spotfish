@@ -9,9 +9,12 @@ module.exports = {
   },
   mode: "development",
   plugins: [
-    new CopyWebpackPlugin({patterns: ['index.html']})
+    new CopyWebpackPlugin({patterns: ['index.html', '**/*.glsl']})
   ],
   experiments: {
     asyncWebAssembly: true
-  }
+  },
+  devServer:{
+    watchFiles: ["*.html", "**/*.glsl", "*.js"]
+  },
 };

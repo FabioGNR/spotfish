@@ -134,7 +134,7 @@ pub struct Instance {
 #[wasm_bindgen]
 impl Instance {
     #[wasm_bindgen(constructor)]
-    pub fn new(canvas: web_sys::HtmlCanvasElement, vert_shader: String, frag_shader: String) -> Result<Instance, JsValue> {
+    pub fn new(canvas: web_sys::HtmlCanvasElement, vert_shader: String, frag_shader: String, vertices: Vec<f32>, verts_per_poly: usize) -> Result<Instance, JsValue> {
         let context = canvas
             .get_context("webgl2")?
             .unwrap()
@@ -154,20 +154,9 @@ impl Instance {
         let program = link_program(&context, &vert_shader, &frag_shader)?;
         context.use_program(Some(&program));
 
-        let vertices = vec![
-            // First triangle:
-             1.0,  1.0,
-            -1.0,  1.0,
-            -1.0, -1.0,
-            // Second triangle:
-            -1.0, -1.0,
-             1.0, -1.0,
-             1.0,  1.0
-        ];
+        let vert_count = (vertices.len() / verts_per_poly) as i32;
 
-        let vert_count = (vertices.len() / 2) as i32;
-
-        init_vertices(&context, &program, vertices)?;
+        init_vertices(&context, &program, vertices, verts_per_poly)?;
 
         // init song sections buffer
         let sections_index = context.get_uniform_block_index(&program, "SongSections");
@@ -328,12 +317,14 @@ fn upload_dynamic_uniforms(context: &WebGl2RenderingContext, program: &WebGlProg
 
 fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
     context.clear_color(0.0, 0.0, 0.0, 1.0);
-    context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
+    context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT | WebGl2RenderingContext::DEPTH_BUFFER_BIT);
+
+    context.enable(WebGl2RenderingContext::DEPTH_TEST);
 
     context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);
 }
 
-pub fn init_vertices(context: &WebGl2RenderingContext, program: &WebGlProgram, vertices: Vec<f32>) -> Result<(), JsValue> {
+pub fn init_vertices(context: &WebGl2RenderingContext, program: &WebGlProgram, vertices: Vec<f32>, verts_per_poly: usize) -> Result<(), JsValue> {
     let position_attribute_location = context.get_attrib_location(&program, "position");
     let buffer = context.create_buffer().ok_or("Failed to create buffer")?;
     context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
@@ -363,7 +354,7 @@ pub fn init_vertices(context: &WebGl2RenderingContext, program: &WebGlProgram, v
 
     context.vertex_attrib_pointer_with_i32(
         position_attribute_location as u32,
-        2,
+        verts_per_poly as i32,
         WebGl2RenderingContext::FLOAT,
         false,
         0,
