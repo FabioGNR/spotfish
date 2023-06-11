@@ -9,7 +9,15 @@
             "name": "Run npm start",
             "request": "launch",
             "type": "node-terminal",
-            "cwd": "${workspaceFolder}/www"
+            "cwd": "${workspaceFolder}/www",
+            "preLaunchTask": "Build",
+            "serverReadyAction":{
+                "action": "debugWithChrome",
+                "pattern": "Loopback: (.*)",
+                "uriFormat": "%s",
+                "webRoot": "${workspaceFolder}",
+                "killOnServerStop": false
+            }
         },
     ]
 }
