@@ -42,6 +42,11 @@ uniform uint currentSongSegment;
 
 out vec4 outColor;
 
+float getLightDistance(float pos, float lightOffset) {
+    float dist = mod(abs(pos), lightOffset) / lightOffset;
+    return sin(dist*PI);
+}
+
 void main() {
     vec2 pos = gl_FragCoord.xy / canvasSize;
     if (out_position.y < 0.01) {
@@ -68,21 +73,23 @@ void main() {
     float pitchPadding = 0.001;
     float pitchColor = segment.timbre[1][1] / segment.timbre[0][1];
 
-    outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist) * 0.2;
     outColor.w = 1.0;
 
-    for (int i = 0; i < 12; i++) {
-        float pitch = segment.pitches[i / 4][i % 4];
-        float nextPitch = nextSegment.pitches[i / 4][i % 4];
-        float interpolatedPitch = pow(mix(pitch, nextPitch, pow(segmentProgress, 2.0)), 2.0);
-        if (abs(pos.x-pitchWidth/2.0 - pitchWidth*float(i)) < (pitchWidth/2.0-pitchPadding) && pos.y < interpolatedPitch && mod(pos.y, 0.01) > 0.001) {
-            outColor = vec4(pos.x, 1.0-pos.x, pitchColor, 1.0);
-        }
+    if (out_position.y > 0.01) {
+        outColor = vec4(out_position.y / 14.0, section.loudness, out_position.z / 20.0, 1.0);
+    } else {
+        // outColor = mix(intensenessColor, mix(uvColor, beatColor, dist), 2.0 - dist) * 0.2;
     }
 
-    if (out_position.y > 0.01) {
-        outColor = vec4(out_position.y / 14.0, beatsPerSecond, out_position.z / 20.0, 1.0);
-    } else {
-        // outColor = vec4(out_position.z, 1.0, 1.0, 1.0);
-    }
+    float lightOffset = 4.0;
+    vec2 lightPosition = out_position.xz + vec2(-9.0, -9.0);
+    float lightDistance = (getLightDistance(lightPosition.x, lightOffset) +  getLightDistance(lightPosition.y, lightOffset)) / 2.0;
+    float lightEffect = pow(lightDistance, 3.0);
+    vec4 lightColor = vec4(0.8, 0.4, 0.01, 1.0);
+    outColor = mix(outColor, lightColor, lightDistance);
+    outColor = mix(outColor, vec4(0.0), lightDistance);
+
+
+    // fog
+    outColor = mix(vec4(0.0, 0.0, 0.0, 1.0), outColor, pow(gl_FragCoord.w, 0.7));
 }

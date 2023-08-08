@@ -42,6 +42,27 @@ in vec4 position;
 out vec3 out_position;
 flat out int vertex_id;
 
+vec3 getPosition(float offset) {
+    SongSection section = songSections[currentSongSection];
+
+    float timeDuration = 20.0;
+    float beatsPerSecond = 60.0 / section.tempo;
+    float adjustedDuration = beatsPerSecond * 32.0;
+    float duration = 20.0;
+    float extent = 14.0;
+    float modTime = mod(songTime+offset, adjustedDuration) / adjustedDuration;
+    vec3 base = vec3(-7.0, 0.5, -7.0);
+    if (modTime < 0.25) {
+        return base + vec3(0.0, 0.0, (modTime / 0.25) * extent);
+    } else if (modTime < 0.5) {
+        return base + vec3(((modTime - 0.25) / 0.25) * extent, 0.0, extent);
+    } else if (modTime < 0.75) {
+        return base + vec3(extent, 0.0, extent- ((modTime - 0.5) / 0.25) * extent);
+    } else {
+        return base + vec3(extent- ((modTime - 0.75) / 0.25) * extent, 0.0, 0.0);
+    }
+}
+
 void main() {
     float aspect = 16.0/9.0;
     float fovRad = 80.0 * PI / 180.0;
@@ -62,8 +83,8 @@ void main() {
     float beatProgress = pow(mod(sectionPos, beatsPerSecond) / beatsPerSecond, 2.0);
 
     vec3 up = vec3(0.0, 1.0, 0.0);
-    vec3 target = vec3(1.0, 0.5, sin(sectionPos) * -5.0);
-    vec3 cameraPos = vec3(target.x, target.y+0.1, target.z + 3.000001);
+    vec3 target = getPosition(0.0);
+    vec3 cameraPos = getPosition(-0.5);
     vec3 zAxis = normalize(target - cameraPos);
     vec3 xAxis = normalize(cross(up, zAxis));
     vec3 yAxis = normalize(cross(zAxis, xAxis));
@@ -80,7 +101,8 @@ void main() {
             0.0, 0.0, 0.0, 1.0
         );
 
-    vec4 pos = vec4(position.x, position.y * sin(1.0/beatsPerSecond), position.z , 1.0);
+    float adjustedHeight = position.y * max(0.2,(1.0+sin(songTime / (beatsPerSecond*4.0)))/2.0);
+    vec4 pos = vec4(position.x, position.y, position.z , 1.0);
     gl_Position = perspective * inverse(lookAt) * pos;
     out_position = pos.xyz;
     vertex_id = gl_VertexID;

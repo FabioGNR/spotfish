@@ -2,7 +2,7 @@ import * as math from 'mathjs';
 import { debugCanvas } from '../base'
 
 let hallWidth = 1.0;
-let hallHeight = 14.0;
+let hallHeight = 15.0;
 let cellSize = 2;
 let vertices = [];
 let ctx = debugCanvas.getContext("2d");
