@@ -44,9 +44,17 @@ flat out int vertex_id;
 
 vec3 getPosition(float offset) {
     SongSection section = songSections[currentSongSection];
+    float timeRemaining = section.duration - (songTime - section.start);
 
     float timeDuration = 20.0;
     float beatsPerSecond = 60.0 / section.tempo;
+    // attempt to smooth hitches
+    if (timeRemaining < 4.0) {
+        SongSection nextSection = songSections[currentSongSection+1u];
+        float nextBeatsPerSecond = 60.0 / nextSection.tempo;
+
+        beatsPerSecond = mix(beatsPerSecond, nextBeatsPerSecond, 1.0 - (timeRemaining/4.0));
+    }
     float adjustedDuration = beatsPerSecond * 32.0;
     float duration = 20.0;
     float extent = 14.0;
